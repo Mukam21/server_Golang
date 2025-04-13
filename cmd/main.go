@@ -25,7 +25,7 @@ func main() {
 	}
 
 	repo := database.NewRepository(db)
-	srv := service.NewService(repo, log)
+	srv := service.NewService(repo, log, cfg)
 	h := handler.NewHandler(srv, log)
 
 	r := gin.Default()

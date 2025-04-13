@@ -31,6 +31,7 @@ func (h *Handler) InitRoutes(r *gin.Engine) {
 			persons.GET("", h.getPersons)
 			persons.GET("/:id", h.getPerson)
 			persons.PUT("/:id", h.updatePerson)
+			persons.PATCH("/:id", h.patchPerson)
 			persons.DELETE("/:id", h.deletePerson)
 		}
 	}
@@ -64,12 +65,16 @@ func (h *Handler) createPerson(c *gin.Context) {
 }
 
 // @Summary Get list of persons
-// @Description Retrieve persons with pagination and optional name filter
+// @Description Retrieve persons with pagination and optional filters
 // @Tags persons
 // @Produce json
 // @Param page query int false "Page number" default(1)
 // @Param limit query int false "Items per page" default(10)
 // @Param name query string false "Filter by name"
+// @Param surname query string false "Filter by surname"
+// @Param age query int false "Filter by age"
+// @Param gender query string false "Filter by gender" enum(male,female,other)
+// @Param nationality query string false "Filter by nationality"
 // @Success 200 {array} model.Person
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -77,7 +82,13 @@ func (h *Handler) createPerson(c *gin.Context) {
 func (h *Handler) getPersons(c *gin.Context) {
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
-	nameFilter := c.Query("name")
+	filters := map[string]string{
+		"name":        c.Query("name"),
+		"surname":     c.Query("surname"),
+		"age":         c.Query("age"),
+		"gender":      c.Query("gender"),
+		"nationality": c.Query("nationality"),
+	}
 
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page < 1 {
@@ -93,7 +104,7 @@ func (h *Handler) getPersons(c *gin.Context) {
 		return
 	}
 
-	persons, err := h.service.GetAll(page, limit, nameFilter)
+	persons, err := h.service.GetAll(page, limit, filters)
 	if err != nil {
 		h.log.Errorf("Failed to get persons: %v", err)
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -168,6 +179,41 @@ func (h *Handler) updatePerson(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"message": "Person updated"})
+}
+
+// @Summary Partially update a person
+// @Description Update specific fields of a person by ID
+// @Tags persons
+// @Accept json
+// @Produce json
+// @Param id path int true "Person ID"
+// @Param person body model.PersonPatchRequest true "Fields to update"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/persons/{id} [patch]
+func (h *Handler) patchPerson(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		h.log.Debug("Invalid ID: ", c.Param("id"))
+		c.JSON(400, gin.H{"error": "Invalid ID"})
+		return
+	}
+
+	var patch model.PersonPatchRequest
+	if err := c.ShouldBindJSON(&patch); err != nil {
+		h.log.Debug("Invalid request: ", err)
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.Patch(id, &patch); err != nil {
+		h.log.Errorf("Failed to patch person with ID %d: %v", id, err)
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Person patched"})
 }
 
 // @Summary Delete a person

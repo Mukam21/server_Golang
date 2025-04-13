@@ -9,3 +9,4 @@ CREATE TABLE persons
     nationality VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_persons_name ON persons (name);

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/Mukam21/server_Golang/pkg/config"
 	"github.com/Mukam21/server_Golang/pkg/model"
 	"github.com/sirupsen/logrus"
 )
@@ -11,18 +12,20 @@ import (
 type Repository interface {
 	Create(person *model.Person) (int64, error)
 	GetByID(id int64) (*model.Person, error)
-	GetAll(page, limit int, nameFilter string) ([]*model.Person, error)
+	GetAll(page, limit int, filters map[string]string) ([]*model.Person, error)
 	Update(person *model.Person) error
+	Patch(id int64, patch *model.PersonPatchRequest) error
 	Delete(id int64) error
 }
 
 type Service struct {
 	repo Repository
 	log  *logrus.Logger
+	cfg  *config.Config
 }
 
-func NewService(repo Repository, log *logrus.Logger) *Service {
-	return &Service{repo: repo, log: log}
+func NewService(repo Repository, log *logrus.Logger, cfg *config.Config) *Service {
+	return &Service{repo: repo, log: log, cfg: cfg}
 }
 
 func (s *Service) CreatePerson(req *model.PersonRequest) (*model.Person, error) {
@@ -68,8 +71,8 @@ func (s *Service) GetByID(id int64) (*model.Person, error) {
 	return person, nil
 }
 
-func (s *Service) GetAll(page, limit int, nameFilter string) ([]*model.Person, error) {
-	persons, err := s.repo.GetAll(page, limit, nameFilter)
+func (s *Service) GetAll(page, limit int, filters map[string]string) ([]*model.Person, error) {
+	persons, err := s.repo.GetAll(page, limit, filters)
 	if err != nil {
 		s.log.Errorf("Failed to get persons: %v", err)
 		return nil, err
@@ -87,6 +90,15 @@ func (s *Service) Update(person *model.Person) error {
 	return nil
 }
 
+func (s *Service) Patch(id int64, patch *model.PersonPatchRequest) error {
+	if err := s.repo.Patch(id, patch); err != nil {
+		s.log.Errorf("Failed to patch person with ID %d: %v", id, err)
+		return err
+	}
+	s.log.Infof("Patched person with ID: %d", id)
+	return nil
+}
+
 func (s *Service) Delete(id int64) error {
 	if err := s.repo.Delete(id); err != nil {
 		s.log.Errorf("Failed to delete person with ID %d: %v", id, err)
@@ -97,7 +109,7 @@ func (s *Service) Delete(id int64) error {
 }
 
 func (s *Service) getAge(name string) (int, error) {
-	resp, err := http.Get("https://api.agify.io/?name=" + name)
+	resp, err := http.Get(s.cfg.APIAgifyURL + "?name=" + name)
 	if err != nil {
 		return 0, err
 	}
@@ -113,7 +125,7 @@ func (s *Service) getAge(name string) (int, error) {
 }
 
 func (s *Service) getGender(name string) (string, error) {
-	resp, err := http.Get("https://api.genderize.io/?name=" + name)
+	resp, err := http.Get(s.cfg.APIGenderizeURL + "?name=" + name)
 	if err != nil {
 		return "", err
 	}
@@ -125,11 +137,14 @@ func (s *Service) getGender(name string) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
+	if result.Gender != "male" && result.Gender != "female" {
+		return "other", nil
+	}
 	return result.Gender, nil
 }
 
 func (s *Service) getNationality(name string) (string, error) {
-	resp, err := http.Get("https://api.nationalize.io/?name=" + name)
+	resp, err := http.Get(s.cfg.APINationalizeURL + "?name=" + name)
 	if err != nil {
 		return "", err
 	}
@@ -137,14 +152,25 @@ func (s *Service) getNationality(name string) (string, error) {
 
 	var result struct {
 		Country []struct {
-			CountryID string `json:"country_id"`
+			CountryID   string  `json:"country_id"`
+			Probability float64 `json:"probability"`
 		} `json:"country"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
-	if len(result.Country) > 0 {
-		return result.Country[0].CountryID, nil
+
+	if len(result.Country) == 0 {
+		return "", nil
 	}
-	return "", nil
+
+	maxProb := 0.0
+	var maxCountry string
+	for _, country := range result.Country {
+		if country.Probability > maxProb {
+			maxProb = country.Probability
+			maxCountry = country.CountryID
+		}
+	}
+	return maxCountry, nil
 }

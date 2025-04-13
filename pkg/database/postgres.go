@@ -3,10 +3,10 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/Mukam21/server_Golang/pkg/config"
 	"github.com/Mukam21/server_Golang/pkg/model"
-
 	_ "github.com/lib/pq"
 )
 
@@ -82,15 +82,46 @@ func (r *Repository) GetByID(id int64) (*model.Person, error) {
 	return person, nil
 }
 
-func (r *Repository) GetAll(page, limit int, nameFilter string) ([]*model.Person, error) {
+func (r *Repository) GetAll(page, limit int, filters map[string]string) ([]*model.Person, error) {
 	offset := (page - 1) * limit
-	query := `
-        SELECT id, name, surname, patronymic, age, gender, nationality
-        FROM persons
-        WHERE name ILIKE $1
-        LIMIT $2 OFFSET $3`
+	var conditions []string
+	var args []interface{}
+	argIndex := 1
 
-	rows, err := r.db.Query(query, "%"+nameFilter+"%", limit, offset)
+	if name := filters["name"]; name != "" {
+		conditions = append(conditions, fmt.Sprintf("name ILIKE $%d", argIndex))
+		args = append(args, "%"+name+"%")
+		argIndex++
+	}
+	if surname := filters["surname"]; surname != "" {
+		conditions = append(conditions, fmt.Sprintf("surname ILIKE $%d", argIndex))
+		args = append(args, "%"+surname+"%")
+		argIndex++
+	}
+	if age := filters["age"]; age != "" {
+		conditions = append(conditions, fmt.Sprintf("age = $%d", argIndex))
+		args = append(args, age)
+		argIndex++
+	}
+	if gender := filters["gender"]; gender != "" {
+		conditions = append(conditions, fmt.Sprintf("gender = $%d", argIndex))
+		args = append(args, gender)
+		argIndex++
+	}
+	if nationality := filters["nationality"]; nationality != "" {
+		conditions = append(conditions, fmt.Sprintf("nationality = $%d", argIndex))
+		args = append(args, nationality)
+		argIndex++
+	}
+
+	query := "SELECT id, name, surname, patronymic, age, gender, nationality FROM persons"
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +163,66 @@ func (r *Repository) Update(person *model.Person) error {
 		person.Nationality,
 		person.ID,
 	)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}
+
+func (r *Repository) Patch(id int64, patch *model.PersonPatchRequest) error {
+	var updates []string
+	var args []interface{}
+	argIndex := 1
+
+	if patch.Name != nil {
+		updates = append(updates, fmt.Sprintf("name = $%d", argIndex))
+		args = append(args, *patch.Name)
+		argIndex++
+	}
+	if patch.Surname != nil {
+		updates = append(updates, fmt.Sprintf("surname = $%d", argIndex))
+		args = append(args, *patch.Surname)
+		argIndex++
+	}
+	if patch.Patronymic != nil {
+		updates = append(updates, fmt.Sprintf("patronymic = $%d", argIndex))
+		args = append(args, *patch.Patronymic)
+		argIndex++
+	}
+	if patch.Age != nil {
+		updates = append(updates, fmt.Sprintf("age = $%d", argIndex))
+		args = append(args, *patch.Age)
+		argIndex++
+	}
+	if patch.Gender != nil {
+		updates = append(updates, fmt.Sprintf("gender = $%d", argIndex))
+		args = append(args, *patch.Gender)
+		argIndex++
+	}
+	if patch.Nationality != nil {
+		updates = append(updates, fmt.Sprintf("nationality = $%d", argIndex))
+		args = append(args, *patch.Nationality)
+		argIndex++
+	}
+
+	if len(updates) == 0 {
+		return fmt.Errorf("no fields to update")
+	}
+
+	query := fmt.Sprintf("UPDATE persons SET %s WHERE id = $%d",
+		strings.Join(updates, ", "), argIndex)
+	args = append(args, id)
+
+	result, err := r.db.Exec(query, args...)
 	if err != nil {
 		return err
 	}
